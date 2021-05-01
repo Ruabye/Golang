@@ -21,7 +21,6 @@ var (
 
 var (
 	STD io.Writer = os.Stdout
-	FIL io.Writer = nil
 )
 
 type Loger struct {
