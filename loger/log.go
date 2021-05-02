@@ -28,7 +28,7 @@ type Loger struct {
 	Output io.Writer
 }
 type FileWriter struct {
-	file     io.Writer
+	file     *os.File
 	FileName string
 	FilePath string
 	MaxSize  int64
@@ -48,23 +48,29 @@ func NewFileWriter(name, filepath string, msize int64) *FileWriter {
 }
 func (f *FileWriter) Write(p []byte) (n int, err error) {
 	//文件是否需要切割
-	fileInfo, err := os.Stat(path.Join(f.FilePath, f.FileName))
+	//fileInfo, err := os.Stat(path.Join(f.FilePath, f.FileName))
+	fileInfo, err := f.file.Stat()
 	if err != nil {
-		//文件不存在则创建
-		if os.IsExist(err) {
-			fmt.Println("获取文件信息失败", err)
-			return 0, nil
-		}
+		// 文件不存在则创建
+		// if os.IsExist(err) {
+		// 	fmt.Println("获取文件信息失败", err)
+		// 	return 0, nil
+		// }
+		fmt.Println("获取文件信息失败", err)
+		return 0, nil
 	}
 	if fileInfo.Size() > f.MaxSize {
-		f = NewFileWriter("re"+f.FileName, f.FilePath, f.MaxSize)
-		n, err = f.Write(p)
-		return
-	} else {
-		n, err = fmt.Fprint(f.file, string(p))
-		return
+		f.file.Close()
+		oldName := path.Join(f.FilePath, f.FileName)
+		newName := path.Join(f.FilePath, f.FileName+".bak"+time.Now().Format("20060102_030405"))
+		os.Rename(oldName, newName)
+		f.file, err = os.OpenFile(path.Join(f.FilePath, f.FileName), os.O_APPEND|os.O_CREATE, 0644)
+		if err != nil {
+			panic(err)
+		}
 	}
-
+	n, err = fmt.Fprint(f.file, string(p))
+	return
 }
 func NewLoger(level LOGTYPE, out io.Writer) Loger {
 	return Loger{
