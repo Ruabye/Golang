@@ -23,8 +23,8 @@ type Redis struct {
 	Time float32 `ini:"time"`
 }
 type Cfg struct {
-	SqlConfig *SqlConfig `ini:"mysql"`
-	Redis     *Redis     `ini:"redis"`
+	SqlConfig `ini:"mysql"`
+	Redis     `ini:"redis"`
 }
 
 func ParseIni(cfgStr string, a interface{}) error {
@@ -57,7 +57,7 @@ func ParseIni(cfgStr string, a interface{}) error {
 						break
 					}
 				}
-				//写一年
+				//.Type()返回值的Type
 				subValue = value.Elem().FieldByName(structName)
 				subKey = value.Elem().FieldByName(structName).Type()
 
@@ -73,36 +73,36 @@ func ParseIni(cfgStr string, a interface{}) error {
 			k := string(ret[0][1])
 			v := string(ret[0][2])
 
-			for i := 0; i < subKey.Elem().NumField(); i++ {
-				field := subKey.Elem().Field(i)
+			for i := 0; i < subKey.NumField(); i++ {
+				field := subKey.Field(i)
 				if field.Tag.Get("ini") == k || field.Name == k {
 					switch field.Type.Kind() {
 					case reflect.String:
-						subValue.Elem().Field(i).SetString(v)
+						subValue.Field(i).SetString(v)
 					case reflect.Int:
 						ret, err := strconv.ParseInt(v, 10, 32)
 						if err != nil {
 							return fmt.Errorf("%d行变量转换失败", index+1)
 						}
-						subValue.Elem().Field(i).SetInt(ret)
+						subValue.Field(i).SetInt(ret)
 					case reflect.Float32:
 						ret, err := strconv.ParseFloat(v, 32)
 						if err != nil {
 							return fmt.Errorf("%d行变量转换失败", index+1)
 						}
-						subValue.Elem().Field(i).SetFloat(ret)
+						subValue.Field(i).SetFloat(ret)
 					case reflect.Float64:
 						ret, err := strconv.ParseFloat(v, 64)
 						if err != nil {
 							return fmt.Errorf("%d行变量转换失败", index+1)
 						}
-						subValue.Elem().Field(i).SetFloat(ret)
+						subValue.Field(i).SetFloat(ret)
 					case reflect.Bool:
 						ret, err := strconv.ParseBool(v)
 						if err != nil {
 							return fmt.Errorf("%d行变量转换失败", index+1)
 						}
-						subValue.Elem().Field(i).SetBool(ret)
+						subValue.Field(i).SetBool(ret)
 					default:
 						return fmt.Errorf("%d行没有找到合适的转换", index+1)
 					}
@@ -117,10 +117,7 @@ func ParseIni(cfgStr string, a interface{}) error {
 	return nil
 }
 func main() {
-	cfg := Cfg{
-		SqlConfig: &SqlConfig{},
-		Redis:     &Redis{},
-	}
+	var cfg Cfg
 	fullText, err := ioutil.ReadFile("ini.cfg")
 	if err != nil {
 		fmt.Println(err)
