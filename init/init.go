@@ -1,96 +1,136 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 type SqlConfig struct {
-	Address  string `init:"ip"`
-	Port     int    `init:"port"`
-	UserName string `init:"username"`
-	Password string `init:"password"`
+	Address  string `ini:"ip"`
+	Port     int    `ini:"port"`
+	UserName string `ini:"username"`
+	Password string `ini:"password"`
 	Open     bool   `other:"open"`
 	Minstep  float32
 }
+type Redis struct {
+	Name string  `ini:"name"`
+	Time float32 `ini:"time"`
+}
+type Cfg struct {
+	SqlConfig *SqlConfig `ini:"mysql"`
+	Redis     *Redis     `ini:"redis"`
+}
 
-func (s *SqlConfig) compileConfig(str string) bool {
-	//文件中的换行要使用\r\n分割，不同平台可能不同
-	lines := strings.Split(str, "\r\n")
-	//分别拿到键和值的信息
-	key := reflect.TypeOf(s)
-	value := reflect.ValueOf(s)
-	//处理文件，把需要的字段提取出来
-	m := make(map[string]string, len(lines))
-	for _, line := range lines {
+func ParseIni(cfgStr string, a interface{}) error {
+	//判断传入数据是否为结构体指针类型，不是结构体指针会报错
+	key := reflect.TypeOf(a)
+	value := reflect.ValueOf(a)
+	fmt.Println(key, value)
+	if key.Kind() != reflect.Ptr || key.Elem().Kind() != reflect.Struct {
+		return errors.New("非结构体指针")
+	}
+	lines := strings.Split(cfgStr, "\r\n")
+	var structName string
+	var subValue reflect.Value
+	var subKey reflect.Type
+	for index, line := range lines {
+		line = strings.TrimSpace(line)
+		//如果是注释则跳过
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || line == "" {
+			continue
+		}
+		//如果以[]包裹,则记录为结构体名
+		if line[0] == '[' {
+			reg := regexp.MustCompile(`^\[[a-zA-Z0-9_]{2,6}\]$`)
+			if reg.MatchString(line) {
+				structName = string(line[1 : len(line)-1])
+				for i := 0; i < value.Elem().NumField(); i++ {
+					field := key.Elem().Field(i)
+					if field.Tag.Get("ini") == structName || field.Name == structName {
+						structName = field.Name
+						break
+					}
+				}
+				//写一年
+				subValue = value.Elem().FieldByName(structName)
+				subKey = value.Elem().FieldByName(structName).Type()
+
+				fmt.Println(subKey, subValue)
+			} else {
+				return fmt.Errorf("%d行名称格式错误", index+1)
+			}
+			continue
+		}
 		if strings.Contains(line, "=") {
-			kv := strings.Split(line, "=")
-			m[kv[0]] = kv[1]
-		}
-	}
-	//v是结构体指针，必须先使用Elem()获得结构体，再调用NumField()获得结构体的变量个数
-	// fmt.Println(v.Elem().NumField())
-	// fmt.Println(m)
+			reg := regexp.MustCompile(`([a-zA-Z0-9]*)=(.*)`)
+			ret := reg.FindAllSubmatch([]byte(line), -1)
+			k := string(ret[0][1])
+			v := string(ret[0][2])
 
-	//结构体中一共有多少个字段，需要用Elem才能通过指针取到结构体.
-	//这里使用value.Elem().NumField()或key.Elem().NumField()可以拿到相同的结果
-	fd := value.Elem().NumField()
-	for i := 0; i < fd; i++ {
-		//获得键的tag,如果没有设置tag的话，直接使用键的名字
-		k := key.Elem().Field(i).Tag.Get("init")
-		if k == "" {
-			k = key.Elem().Field(i).Name
+			for i := 0; i < subKey.Elem().NumField(); i++ {
+				field := subKey.Elem().Field(i)
+				if field.Tag.Get("ini") == k || field.Name == k {
+					switch field.Type.Kind() {
+					case reflect.String:
+						subValue.Elem().Field(i).SetString(v)
+					case reflect.Int:
+						ret, err := strconv.ParseInt(v, 10, 32)
+						if err != nil {
+							return fmt.Errorf("%d行变量转换失败", index+1)
+						}
+						subValue.Elem().Field(i).SetInt(ret)
+					case reflect.Float32:
+						ret, err := strconv.ParseFloat(v, 32)
+						if err != nil {
+							return fmt.Errorf("%d行变量转换失败", index+1)
+						}
+						subValue.Elem().Field(i).SetFloat(ret)
+					case reflect.Float64:
+						ret, err := strconv.ParseFloat(v, 64)
+						if err != nil {
+							return fmt.Errorf("%d行变量转换失败", index+1)
+						}
+						subValue.Elem().Field(i).SetFloat(ret)
+					case reflect.Bool:
+						ret, err := strconv.ParseBool(v)
+						if err != nil {
+							return fmt.Errorf("%d行变量转换失败", index+1)
+						}
+						subValue.Elem().Field(i).SetBool(ret)
+					default:
+						return fmt.Errorf("%d行没有找到合适的转换", index+1)
+					}
+
+				}
+			}
+		} else {
+			return fmt.Errorf("%d行名称格式错误", index+1)
 		}
-		//获得某个键下值得具体类型(在reflec中得类型)
-		switch key.Elem().Field(i).Type.Kind() {
-		case reflect.String:
-			//使用SetXXX方法对 值 进行赋值。使用key会报错
-			value.Elem().Field(i).SetString(m[k])
-		case reflect.Int:
-			//使用strconv包将字符串转为其他类型
-			interger, err := strconv.ParseInt(m[k], 10, 32)
-			if err != nil {
-				fmt.Println("一个整数不符合规范", err)
-			}
-			value.Elem().Field(i).SetInt(interger)
-		case reflect.Float32:
-			fmt.Printf(m[k])
-			float, err := strconv.ParseFloat(m[k], 32)
-			if err != nil {
-				fmt.Println("一个浮点数不符合规范", err)
-			}
-			value.Elem().Field(i).SetFloat(float)
-		case reflect.Float64:
-			fmt.Printf(m[k])
-			float, err := strconv.ParseFloat(m[k], 64)
-			if err != nil {
-				fmt.Println("一个浮点数不符合规范", err)
-			}
-			value.Elem().Field(i).SetFloat(float)
-		case reflect.Bool:
-			b, err := strconv.ParseBool(m[k])
-			if err != nil {
-				fmt.Println("一个布尔值不符合规范", err)
-			}
-			value.Elem().Field(i).SetBool(b)
-		}
+
 	}
-	return true
+	return nil
 }
 func main() {
-	//读取文件
-	content, err := ioutil.ReadFile("init.cof")
+	cfg := Cfg{
+		SqlConfig: &SqlConfig{},
+		Redis:     &Redis{},
+	}
+	fullText, err := ioutil.ReadFile("ini.cfg")
 	if err != nil {
-		fmt.Printf("open file failed, err = %v", err)
+		fmt.Println(err)
+		return
 	}
-	var sc SqlConfig
-	ok := sc.compileConfig(string(content))
-	if ok {
-		fmt.Print(sc)
-	} else {
-		fmt.Println("解析失败")
+	err = ParseIni(string(fullText), &cfg)
+	if err != nil {
+		fmt.Println(err)
+		return
 	}
+	fmt.Println(cfg.SqlConfig)
+	fmt.Println(cfg.Redis)
 }
